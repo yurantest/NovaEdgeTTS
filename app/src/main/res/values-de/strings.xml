@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NovaEdgeTTS</string>
+    <string name="app_subtitle">System-Sprachsynthese-Engine</string>
+    <string name="howto_title">So aktivieren</string>
+    <string name="howto_body">1. Liste aktualisieren und gewünschte Stimmen markieren\n2. Auf das Zahnrad ⚙ tippen — Android-Einstellungen für Sprachausgabe öffnen sich\n3. Nova Edge TTS als bevorzugte Engine wählen</string>
+    <string name="status_loading">Stimmen: werden geladen…</string>
+    <string name="status_updating">Stimmenliste wird aktualisiert…</string>
+    <string name="status_count">Edge-Stimmen: %1$d  ·  ausgewählt: %2$d</string>
+    <string name="status_empty_hint">Keine Stimmen — tippen Sie auf ↻ zum Aktualisieren</string>
+    <string name="status_not_found">Nichts gefunden</string>
+    <string name="status_tts_settings_fail">TTS-Einstellungen konnten nicht geöffnet werden</string>
+    <string name="status_error">Fehler: %1$s</string>
+    <string name="search_hint">Stimme oder Sprache suchen</string>
+    <string name="cd_refresh">Stimmen aktualisieren</string>
+    <string name="cd_settings">TTS-Einstellungen</string>
+    <string name="logs">Protokolle</string>
+    <string name="clear">Löschen</string>
+    <string name="logs_cleared">Protokolle gelöscht</string>
+    <string name="logs_title">Nova TTS Protokolle</string>
+    <string name="logs_copy">Kopieren</string>
+    <string name="logs_copied">Protokolle in die Zwischenablage kopiert</string>
+    <string name="ok">OK</string>
+</resources>

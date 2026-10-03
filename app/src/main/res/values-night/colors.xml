@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="md_primary">#64B5F6</color>
+    <color name="md_primary_dark">#0A2540</color>
+    <color name="md_on_primary">#003258</color>
+    <color name="md_surface">#121416</color>
+    <color name="md_surface_card">#1E2227</color>
+    <color name="md_on_surface">#E8EAED</color>
+    <color name="md_on_surface_variant">#9AA0A6</color>
+    <color name="md_outline">#2D3238</color>
+    <color name="md_accent">#90CAF9</color>
+    <color name="md_status_bar">#0A2540</color>
+</resources>

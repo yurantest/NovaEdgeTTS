@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NovaEdgeTTS</string>
+    <string name="app_subtitle">Системный движок синтеза речи</string>
+    <string name="howto_title">Как включить</string>
+    <string name="howto_body">1. Обновите список и отметьте нужные голоса\n2. Нажмите кнопку шестерёнки ⚙ — откроются настройки синтеза речи Android\n3. Выберите Nova Edge TTS как предпочитаемый движок</string>
+    <string name="status_loading">Голоса: загрузка…</string>
+    <string name="status_updating">Обновление списка голосов…</string>
+    <string name="status_count">Голосов Edge: %1$d  ·  отмечено: %2$d</string>
+    <string name="status_empty_hint">Нет голосов — нажмите ↻ чтобы обновить</string>
+    <string name="status_not_found">Ничего не найдено</string>
+    <string name="status_tts_settings_fail">Не удалось открыть настройки TTS</string>
+    <string name="status_error">Ошибка: %1$s</string>
+    <string name="search_hint">Поиск голоса или языка</string>
+    <string name="cd_refresh">Обновить голоса</string>
+    <string name="cd_settings">Настройки TTS</string>
+    <string name="logs">Логи</string>
+    <string name="clear">Очистить</string>
+    <string name="logs_cleared">Логи очищены</string>
+    <string name="logs_title">Логи Nova TTS</string>
+    <string name="logs_copy">Копировать</string>
+    <string name="logs_copied">Логи скопированы в буфер обмена</string>
+    <string name="ok">OK</string>
+</resources>

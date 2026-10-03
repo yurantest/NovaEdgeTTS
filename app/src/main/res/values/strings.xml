@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NovaEdgeTTS</string>
+    <string name="app_subtitle">System text-to-speech engine</string>
+    <string name="howto_title">How to enable</string>
+    <string name="howto_body">1. Refresh the list and select the voices you need\n2. Tap the gear icon ⚙ to open Android text-to-speech settings\n3. Choose Nova Edge TTS as the preferred engine</string>
+    <string name="status_loading">Voices: loading…</string>
+    <string name="status_updating">Updating voice list…</string>
+    <string name="status_count">Edge voices: %1$d  ·  selected: %2$d</string>
+    <string name="status_empty_hint">No voices — tap ↻ to refresh</string>
+    <string name="status_not_found">Nothing found</string>
+    <string name="status_tts_settings_fail">Could not open TTS settings</string>
+    <string name="status_error">Error: %1$s</string>
+    <string name="search_hint">Search voice or language</string>
+    <string name="cd_refresh">Refresh voices</string>
+    <string name="cd_settings">TTS settings</string>
+    <string name="logs">Logs</string>
+    <string name="clear">Clear</string>
+    <string name="logs_cleared">Logs cleared</string>
+    <string name="logs_title">Nova TTS logs</string>
+    <string name="logs_copy">Copy</string>
+    <string name="logs_copied">Logs copied to clipboard</string>
+    <string name="ok">OK</string>
+</resources>

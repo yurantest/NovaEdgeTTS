@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NovaEdgeTTS</string>
+    <string name="app_subtitle">Systemowy silnik syntezy mowy</string>
+    <string name="howto_title">Jak włączyć</string>
+    <string name="howto_body">1. Odśwież listę i zaznacz potrzebne głosy\n2. Naciśnij ikonę koła zębatego ⚙ — otworzą się ustawienia syntezy mowy Androida\n3. Wybierz Nova Edge TTS jako preferowany silnik</string>
+    <string name="status_loading">Głosy: ładowanie…</string>
+    <string name="status_updating">Aktualizowanie listy głosów…</string>
+    <string name="status_count">Głosy Edge: %1$d  ·  zaznaczone: %2$d</string>
+    <string name="status_empty_hint">Brak głosów — naciśnij ↻ aby odświeżyć</string>
+    <string name="status_not_found">Nic nie znaleziono</string>
+    <string name="status_tts_settings_fail">Nie udało się otworzyć ustawień TTS</string>
+    <string name="status_error">Błąd: %1$s</string>
+    <string name="search_hint">Szukaj głosu lub języka</string>
+    <string name="cd_refresh">Odśwież głosy</string>
+    <string name="cd_settings">Ustawienia TTS</string>
+    <string name="logs">Logi</string>
+    <string name="clear">Wyczyść</string>
+    <string name="logs_cleared">Logi wyczyszczone</string>
+    <string name="logs_title">Logi Nova TTS</string>
+    <string name="logs_copy">Kopiuj</string>
+    <string name="logs_copied">Logi skopiowane do schowka</string>
+    <string name="ok">OK</string>
+</resources>

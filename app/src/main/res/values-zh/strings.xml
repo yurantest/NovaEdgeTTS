@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NovaEdgeTTS</string>
+    <string name="app_subtitle">系统文本转语音引擎</string>
+    <string name="howto_title">如何启用</string>
+    <string name="howto_body">1. 刷新列表并勾选需要的语音\n2. 点击齿轮图标 ⚙ 打开 Android 语音合成设置\n3. 将 Nova Edge TTS 选为首选引擎</string>
+    <string name="status_loading">语音：加载中…</string>
+    <string name="status_updating">正在更新语音列表…</string>
+    <string name="status_count">Edge 语音：%1$d  ·  已选：%2$d</string>
+    <string name="status_empty_hint">暂无语音 — 点击 ↻ 刷新</string>
+    <string name="status_not_found">未找到结果</string>
+    <string name="status_tts_settings_fail">无法打开 TTS 设置</string>
+    <string name="status_error">错误：%1$s</string>
+    <string name="search_hint">搜索语音或语言</string>
+    <string name="cd_refresh">刷新语音</string>
+    <string name="cd_settings">TTS 设置</string>
+    <string name="logs">日志</string>
+    <string name="clear">清除</string>
+    <string name="logs_cleared">日志已清除</string>
+    <string name="logs_title">Nova TTS 日志</string>
+    <string name="logs_copy">复制</string>
+    <string name="logs_copied">日志已复制到剪贴板</string>
+    <string name="ok">确定</string>
+</resources>
