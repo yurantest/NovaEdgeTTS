@@ -6,7 +6,12 @@
 
 # Скришоты
 
-<img width="864" height="1920" alt="IMG_20261004_000844" src="https://github.com/user-attachments/assets/23168294-c2ee-4d0b-a256-31a4d2a68624" />
+<img width="1080" height="2332" alt="photo_2026-10-07_13-25-54" src="https://github.com/user-attachments/assets/9108dad0-5b8a-48ff-b656-8b71cf6bd2eb" />
+
+
+<img width="1080" height="2308" alt="photo_2026-10-07_13-25-29" src="https://github.com/user-attachments/assets/be200424-e5ea-470c-9c50-eaf79e3b6030" />
+
+
 
 ## Лицензия
 
