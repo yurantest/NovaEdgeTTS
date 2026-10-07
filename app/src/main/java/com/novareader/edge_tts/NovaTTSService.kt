@@ -6,6 +6,7 @@ import android.speech.tts.SynthesisRequest
 import android.speech.tts.TextToSpeech
 import android.speech.tts.TextToSpeechService
 import android.speech.tts.Voice
+import java.util.IllformedLocaleException
 import java.util.Locale
 import java.util.MissingResourceException
 
@@ -17,13 +18,33 @@ class NovaTTSService : TextToSpeechService() {
     }
     private val client = EdgeTTSClient()
     private val prefetch = EdgePrefetch(client)
-    private var currentLanguage = Locale("en", "US")
+    // NovaEdgeTTS is voice-first: every supported entry is a concrete Edge voice.
+    // Start with the first selected voice instead of the phone/system locale.
+    private var currentLanguage = Locale("en", "US", "default")
     private var currentVoiceName: String? = null
 
     override fun onCreate() {
         super.onCreate()
         FileLogger.init(this)
         FileLogger.log("NovaTTSService создан")
+
+        // Do not inherit the Android phone locale as NovaEdgeTTS's language.
+        // The engine is voice-first: choose one concrete Edge voice as its
+        // initial/default voice. This prevents the Settings "system language"
+        // from becoming an implicit engine language.
+        try {
+            val first = selectableVoices().firstOrNull()
+            if (first != null) {
+                currentVoiceName = first.name
+                currentLanguage = voiceLocale(first)
+                FileLogger.log("Начальный голос: ${first.name}, locale=${currentLanguage}")
+            } else {
+                FileLogger.log("Нет выбранных голосов при создании движка")
+            }
+        } catch (e: Throwable) {
+            FileLogger.error("Не удалось выбрать начальный голос", e)
+        }
+
         prefetch.warmup()   // DNS + TLS заранее: первая фраза не платит за холодный старт
     }
 
@@ -40,7 +61,7 @@ class NovaTTSService : TextToSpeechService() {
             list.map { v ->
                 Voice(
                     v.name,
-                    localeOf(v.locale),
+                    voiceLocale(v),
                     Voice.QUALITY_NORMAL,
                     Voice.LATENCY_NORMAL,
                     true,
@@ -84,7 +105,7 @@ class NovaTTSService : TextToSpeechService() {
                 FileLogger.log("Голос не найден в кэше")
                 return TextToSpeech.ERROR
             }
-            currentLanguage = localeOf(v.locale)
+            currentLanguage = voiceLocale(v)
             FileLogger.log("Голос загружен: $voiceName, язык: ${currentLanguage}")
             TextToSpeech.SUCCESS
         } catch (e: Throwable) {
@@ -94,22 +115,28 @@ class NovaTTSService : TextToSpeechService() {
     }
 
     override fun onGetDefaultVoiceNameFor(lang: String?, country: String?, variant: String?): String? {
-        FileLogger.log("onGetDefaultVoiceNameFor: lang=$lang, country=$country")
+        FileLogger.log("onGetDefaultVoiceNameFor: lang=$lang, country=$country, variant=$variant")
         return try {
             val voices = selectableVoices()
-            if (voices.isEmpty()) {
-                FileLogger.log("Нет доступных голосов")
-                return null
+            if (voices.isEmpty() || lang.isNullOrBlank()) return null
+
+            // A concrete voice is identified by its variant. If Android gives us
+            // one, it MUST win; never substitute another voice of the same locale.
+            if (!variant.isNullOrBlank()) {
+                val exact = voices.firstOrNull { v ->
+                    val loc = voiceLocale(v)
+                    iso3Lang(loc).equals(lang, true) &&
+                        iso3Country(loc).equals(country ?: "", true) &&
+                        loc.variant.equals(variant, true)
+                }
+                FileLogger.log("Точный голос по variant: ${exact?.name}")
+                return exact?.name
             }
-            val match = voices.firstOrNull { v ->
-                val loc = localeOf(v.locale)
-                iso3Lang(loc).equals(lang, true) &&
-                        (country.isNullOrBlank() || iso3Country(loc).equals(country, true))
-            } ?: voices.firstOrNull { v ->
-                iso3Lang(localeOf(v.locale)).equals(lang, true)
-            }
-            FileLogger.log("Найден голос по умолчанию: ${match?.name}")
-            match?.name
+
+            // A generic language has no concrete Edge voice. Android must resolve
+            // generic requests from the concrete voices returned by onGetVoices().
+            FileLogger.log("Общий язык без variant не поддерживается как отдельный голос")
+            null
         } catch (e: Throwable) {
             FileLogger.error("Ошибка в onGetDefaultVoiceNameFor", e)
             null
@@ -127,31 +154,28 @@ class NovaTTSService : TextToSpeechService() {
     }
 
     override fun onIsLanguageAvailable(lang: String?, country: String?, variant: String?): Int {
-        FileLogger.log("onIsLanguageAvailable: lang=$lang, country=$country")
+        FileLogger.log("onIsLanguageAvailable: lang=$lang, country=$country, variant=$variant")
         return try {
-            if (lang.isNullOrBlank()) {
-                FileLogger.log("Язык пустой")
+            if (lang.isNullOrBlank()) return TextToSpeech.LANG_NOT_SUPPORTED
+            if (variant.isNullOrBlank()) {
+                FileLogger.log("Общий язык без variant не поддерживается")
                 return TextToSpeech.LANG_NOT_SUPPORTED
             }
-            val voices = selectableVoices()
-            if (voices.isEmpty()) {
-                FileLogger.log("Нет голосов в кэше")
-                return TextToSpeech.LANG_MISSING_DATA
+
+            val exact = selectableVoices().firstOrNull { v ->
+                val loc = voiceLocale(v)
+                iso3Lang(loc).equals(lang, true) &&
+                    iso3Country(loc).equals(country ?: "", true) &&
+                    loc.variant.equals(variant, true)
             }
-            val langMatch = voices.filter { iso3Lang(localeOf(it.locale)).equals(lang, true) }
-            if (langMatch.isEmpty()) {
-                FileLogger.log("Язык не поддерживается")
-                return TextToSpeech.LANG_NOT_SUPPORTED
+
+            if (exact != null) {
+                FileLogger.log("Конкретный голос доступен: ${exact.name}")
+                TextToSpeech.LANG_COUNTRY_VAR_AVAILABLE
+            } else {
+                FileLogger.log("Конкретный голос недоступен")
+                TextToSpeech.LANG_NOT_SUPPORTED
             }
-            if (!country.isNullOrBlank()) {
-                val countryMatch = langMatch.any { iso3Country(localeOf(it.locale)).equals(country, true) }
-                if (countryMatch) {
-                    FileLogger.log("Язык и страна доступны")
-                    return TextToSpeech.LANG_COUNTRY_AVAILABLE
-                }
-            }
-            FileLogger.log("Только язык доступен")
-            TextToSpeech.LANG_AVAILABLE
         } catch (e: Throwable) {
             FileLogger.error("Ошибка в onIsLanguageAvailable", e)
             TextToSpeech.LANG_NOT_SUPPORTED
@@ -159,27 +183,25 @@ class NovaTTSService : TextToSpeechService() {
     }
 
     override fun onLoadLanguage(lang: String?, country: String?, variant: String?): Int {
-        FileLogger.log("onLoadLanguage: lang=$lang, country=$country")
+        FileLogger.log("onLoadLanguage: lang=$lang, country=$country, variant=$variant")
         return try {
-            val status = onIsLanguageAvailable(lang, country, variant)
-            if (status < TextToSpeech.LANG_AVAILABLE) {
-                FileLogger.log("Язык недоступен, статус: $status")
-                return status
+            if (lang.isNullOrBlank()) return TextToSpeech.LANG_NOT_SUPPORTED
+            if (variant.isNullOrBlank()) {
+                FileLogger.log("Язык без конкретного голоса отклонён")
+                return TextToSpeech.LANG_NOT_SUPPORTED
             }
-            val voices = selectableVoices()
-            val chosen = voices.firstOrNull { v ->
-                val loc = localeOf(v.locale)
+
+            val chosen = selectableVoices().firstOrNull { v ->
+                val loc = voiceLocale(v)
                 iso3Lang(loc).equals(lang, true) &&
-                        (country.isNullOrBlank() || iso3Country(loc).equals(country, true))
-            } ?: voices.firstOrNull { iso3Lang(localeOf(it.locale)).equals(lang, true) }
-            if (chosen != null) {
-                currentLanguage = localeOf(chosen.locale)
-                currentVoiceName = chosen.name
-                FileLogger.log("Язык загружен: ${currentLanguage}, голос: $currentVoiceName")
-            } else {
-                FileLogger.log("Голос для языка не найден")
-            }
-            status
+                    iso3Country(loc).equals(country ?: "", true) &&
+                    loc.variant.equals(variant, true)
+            } ?: return TextToSpeech.LANG_NOT_SUPPORTED
+
+            currentLanguage = voiceLocale(chosen)
+            currentVoiceName = chosen.name
+            FileLogger.log("Загружен конкретный голос: ${chosen.name}, locale=${currentLanguage}")
+            TextToSpeech.LANG_COUNTRY_VAR_AVAILABLE
         } catch (e: Throwable) {
             FileLogger.error("Ошибка в onLoadLanguage", e)
             TextToSpeech.LANG_NOT_SUPPORTED
@@ -191,10 +213,13 @@ class NovaTTSService : TextToSpeechService() {
         FileLogger.log("voiceName из запроса: ${request.voiceName}")
         FileLogger.log("language: ${request.language}, country: ${request.country}")
 
-        val voiceName = request.voiceName
-            ?.takeIf { it.isNotBlank() }
-            ?: currentVoiceName
-            ?: onGetDefaultVoiceNameFor(request.language, request.country, request.variant)
+        // Android does not always put Voice.name into SynthesisRequest.
+        // In particular, Settings can select a voice by its
+        // language/country/variant and then call synthesis with voiceName == null.
+        // Resolve the exact Edge voice from the requested variant BEFORE falling
+        // back to currentVoiceName; otherwise the previously loaded voice can
+        // silently win (e.g. Dmitry is spoken after selecting Svetlana).
+        val voiceName = resolveVoiceForRequest(request)
 
         if (voiceName.isNullOrBlank()) {
             FileLogger.error("Не удалось определить голос")
@@ -206,8 +231,19 @@ class NovaTTSService : TextToSpeechService() {
 
         Thread {
             try {
-                val text = request.charSequenceText?.toString().orEmpty()
+                var text = request.charSequenceText?.toString().orEmpty()
                 FileLogger.log("Текст для синтеза: '$text'")
+                // Проверка голоса из настроек Android: система шлёт свой пример на языке
+                // интерфейса, а голос другого языка его не прочтёт — подставляем пример на языке голоса.
+                val fromSettings = try {
+                    packageManager.getPackagesForUid(request.callerUid)
+                        ?.any { it.contains("settings", true) } == true
+                } catch (_: Exception) { false }
+                (SampleTexts.replacementFor(text, voiceName)
+                    ?: SampleTexts.replacementForSettings(text, voiceName, fromSettings))?.let {
+                    FileLogger.log("Пример на другом языке заменён на язык голоса: '$it'")
+                    text = it
+                }
 
                 if (text.isBlank()) {
                     FileLogger.log("Текст пустой")
@@ -301,8 +337,101 @@ class NovaTTSService : TextToSpeechService() {
         return if (selected.isNotEmpty()) all.filter { it.name in selected } else all
     }
 
-    private fun localeOf(tag: String): Locale =
-        Locale.forLanguageTag(tag.replace('_', '-'))
+    /**
+     * Resolves the Edge ShortName that Android actually wants for this synthesis
+     * request. Android may identify our synthetic voices either by Edge ShortName
+     * (e.g. ru-RU-SvetlanaNeural) or by the TTS locale triplet
+     * (e.g. rus-RUS-Svetlana). The latter must be mapped back to the Edge voice.
+     */
+    private fun resolveVoiceForRequest(request: SynthesisRequest): String? {
+        val voices = selectableVoices()
+        if (voices.isEmpty()) return null
+
+        val requestedName = request.voiceName?.takeIf { it.isNotBlank() }
+        if (requestedName != null) {
+            voices.firstOrNull { it.name.equals(requestedName, true) }?.let {
+                FileLogger.log("Точный Edge voiceName из запроса: ${it.name}")
+                return it.name
+            }
+
+            // Some Android versions may pass our synthetic locale/variant as
+            // voiceName instead of the original Edge ShortName.
+            voices.firstOrNull { syntheticVoiceId(it).equals(requestedName, true) }?.let {
+                FileLogger.log("Синтетический voiceName преобразован: $requestedName -> ${it.name}")
+                return it.name
+            }
+        }
+
+        val lang = request.language
+        val country = request.country
+        val variant = request.variant
+
+        // Most important path: variant identifies the individual Edge voice.
+        if (!variant.isNullOrBlank()) {
+            voices.firstOrNull { v ->
+                val loc = voiceLocale(v)
+                iso3Lang(loc).equals(lang, true) &&
+                        (country.isNullOrBlank() || iso3Country(loc).equals(country, true)) &&
+                        loc.variant.equals(variant, true)
+            }?.let {
+                FileLogger.log("Голос найден по variant: $variant -> ${it.name}")
+                return it.name
+            }
+        }
+
+        if (variant.isNullOrBlank() && requestedName.isNullOrBlank()) {
+            FileLogger.log("Запрос без конкретного variant и voiceName отклонён")
+            return null
+        }
+
+        FileLogger.log("Запрос без конкретного variant отклонён: голос не определён")
+        return null
+    }
+
+    private fun syntheticVoiceId(v: EdgeVoice): String {
+        val loc = voiceLocale(v)
+        return buildString {
+            append(iso3Lang(loc))
+            if (loc.country.isNotEmpty()) {
+                append('-').append(iso3Country(loc))
+            }
+            if (loc.variant.isNotEmpty()) {
+                append('-').append(loc.variant)
+            }
+        }
+    }
+
+    /**
+     * Локаль для Voice. Даёт каждому голосу уникальный variant
+     * ("ru-RU-svetlana", "ru-RU-dmitry"), чтобы Android TTS в настройках
+     * показывал их ОТДЕЛЬНЫМИ строками, а не схлопывал в один "Русский".
+     */
+    /** Full Android TTS locale for an Edge voice, including the voice variant. */
+    private fun voiceLocale(v: EdgeVoice): Locale {
+        val clean = v.locale.replace('_', '-')
+        val parts = clean.split('-')
+        if (parts.size >= 2) {
+            // The Edge API stores Locale (ru-RU) separately from ShortName
+            // (ru-RU-SvetlanaNeural). Android needs both pieces in Voice.locale.
+            val variant = v.name.substringAfterLast('-').removeSuffix("Neural").trim()
+            return if (variant.isNotEmpty()) {
+                Locale(parts[0], parts[1], variant)
+            } else {
+                Locale(parts[0], parts[1])
+            }
+        }
+        return Locale.forLanguageTag(clean)
+    }
+
+    // Kept for callers that already have a complete lang-country-variant tag.
+    private fun localeOf(tag: String): Locale {
+        val clean = tag.replace('_', '-')
+        val parts = clean.split('-')
+        if (parts.size >= 3) {
+            return Locale(parts[0], parts[1], parts[2].removeSuffix("Neural"))
+        }
+        return Locale.forLanguageTag(clean)
+    }
 
     private fun iso3Lang(locale: Locale): String = try {
         locale.isO3Language

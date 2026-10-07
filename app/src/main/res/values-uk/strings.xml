@@ -3,7 +3,7 @@
     <string name="app_name">NovaEdgeTTS</string>
     <string name="app_subtitle">Системний рушій синтезу мовлення</string>
     <string name="howto_title">Як увімкнути</string>
-    <string name="howto_body">1. Оновіть список і позначте потрібні голоси\n2. Натисніть кнопку шестерні ⚙ — відкриються налаштування синтезу мовлення Android\n3. Виберіть Nova Edge TTS як основний рушій</string>
+    <string name="howto_body">1. Оновіть список і позначте потрібні голоси\n2. Натисніть кнопку шестерні ⚙ — відкриються налаштування синтезу мовлення Android\n3. Виберіть Nova Edge TTS як основний рушій\n4. Виберіть конкретний голос (Світлана, Дмитро, Jenny, ...)</string>
     <string name="status_loading">Голоси: завантаження…</string>
     <string name="status_updating">Оновлення списку голосів…</string>
     <string name="status_count">Голосів Edge: %1$d  ·  позначено: %2$d</string>
@@ -21,4 +21,6 @@
     <string name="logs_copy">Копіювати</string>
     <string name="logs_copied">Журнал скопійовано</string>
     <string name="ok">OK</string>
+    <string name="chip_checked">Позначені: %1$d</string>
+    <string name="status_none_checked">Немає позначених голосів</string>
 </resources>

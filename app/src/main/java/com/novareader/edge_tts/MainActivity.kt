@@ -34,12 +34,55 @@ class MainActivity : android.app.Activity() {
         const val ICON_LOGS = "\uE873"
         const val ICON_DELETE = "\uE872"
         const val ICON_MIC = "\uE029"
+        const val ICON_PLAY = "\uE037"
+        const val ICON_STOP = "\uE047"
     }
 
     private lateinit var repo: EdgeVoiceRepository
+
+    // ── Предзаписанные примеры голосов: assets/samples/<ShortName>.mp3 ──
+    // Файлы делает tools/make_voice_samples.py; кнопка ▶ показывается только для голосов,
+    // у которых файл есть. Проигрывание локальное — без сети и без Edge-сервиса.
+    private val sampleNames: Set<String> by lazy {
+        try { assets.list("samples")?.map { it.removeSuffix(".mp3") }?.toSet() ?: emptySet() }
+        catch (_: Exception) { emptySet() }
+    }
+    private var samplePlayer: android.media.MediaPlayer? = null
+    private var samplePlaying: String? = null
+
+    private fun stopSample() {
+        try { samplePlayer?.release() } catch (_: Exception) {}
+        samplePlayer = null
+        samplePlaying = null
+    }
+
+    /** Играет пример голоса; повторное нажатие на тот же голос — стоп. */
+    private fun toggleSample(name: String) {
+        val wasPlaying = samplePlaying == name
+        stopSample()
+        if (wasPlaying) { render(); return }
+        try {
+            val fd = assets.openFd("samples/$name.mp3")
+            val mp = android.media.MediaPlayer()
+            mp.setDataSource(fd.fileDescriptor, fd.startOffset, fd.length)
+            fd.close()
+            mp.setOnCompletionListener { stopSample(); render() }
+            mp.setOnErrorListener { _, _, _ -> stopSample(); render(); true }
+            mp.prepare()
+            mp.start()
+            samplePlayer = mp
+            samplePlaying = name
+        } catch (e: Exception) {
+            FileLogger.log("Пример голоса $name не воспроизвёлся: ${e.javaClass.simpleName}")
+            Toast.makeText(this, "Не удалось воспроизвести пример", Toast.LENGTH_SHORT).show()
+        }
+        render()
+    }
     private lateinit var list: LinearLayout
     private lateinit var status: TextView
     private lateinit var search: EditText
+    private lateinit var chipChecked: TextView
+    private var onlyChecked = false   // фильтр «Отмеченные»: показывать только отмеченные голоса
     private var voices = emptyList<EdgeVoice>()
     private val executor = Executors.newSingleThreadExecutor()
     private var tts: TextToSpeech? = null
@@ -102,31 +145,78 @@ class MainActivity : android.app.Activity() {
         header.addView(iconButton(ICON_SETTINGS, getString(R.string.cd_settings)) { openTtsSettings() })
         root.addView(header)
 
-        // ── How-to card ─────────────────────────────────────────
+        // ── How-to card (collapsible) ───────────────────────────
         root.addView(card {
-            addView(TextView(this@MainActivity).apply {
-                text = getString(R.string.howto_title)
-                setTextColor(color(R.color.md_on_surface))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            })
-            addView(TextView(this@MainActivity).apply {
+            val howToBody = TextView(this@MainActivity).apply {
                 text = getString(R.string.howto_body)
                 setTextColor(color(R.color.md_on_surface_variant))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
                 setPadding(0, dp(6), 0, 0)
                 setLineSpacing(dp(2).toFloat(), 1f)
+            }
+
+            val howToArrow = TextView(this@MainActivity).apply {
+                text = "⌃"
+                setTextColor(color(R.color.md_on_surface_variant))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+                gravity = Gravity.CENTER
+                setPadding(dp(8), 0, dp(2), 0)
+            }
+
+            val howToHeader = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    val expanded = howToBody.visibility == View.VISIBLE
+                    howToBody.visibility = if (expanded) View.GONE else View.VISIBLE
+                    howToArrow.text = if (expanded) "⌄" else "⌃"
+                }
+            }
+
+            howToHeader.addView(TextView(this@MainActivity).apply {
+                text = getString(R.string.howto_title)
+                setTextColor(color(R.color.md_on_surface))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
             })
+            howToHeader.addView(howToArrow, LinearLayout.LayoutParams(dp(32), dp(32)))
+
+            addView(howToHeader)
+            addView(howToBody)
         })
 
-        // ── Status ──────────────────────────────────────────────
+        // ── Status + кнопка «Отмеченные» ────────────────────────
+        val statusRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(6), dp(4), dp(6))
+        }
         status = TextView(this).apply {
             text = getString(R.string.status_loading)
             setTextColor(color(R.color.md_on_surface_variant))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            setPadding(dp(4), dp(10), dp(4), dp(6))
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
-        root.addView(status)
+        statusRow.addView(status)
+        chipChecked = TextView(this).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            gravity = Gravity.CENTER
+            setPadding(dp(14), dp(7), dp(14), dp(7))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                onlyChecked = !onlyChecked
+                updateChip()
+                render()
+            }
+        }
+        statusRow.addView(chipChecked)
+        root.addView(statusRow)
+        updateChip()
 
         // ── Search field ────────────────────────────────────────
         val searchRow = LinearLayout(this).apply {
@@ -310,8 +400,8 @@ class MainActivity : android.app.Activity() {
 
                 if (repo.selected().isEmpty() && data.isNotEmpty()) {
                     val prefer = listOf(
-                        "ru-RU-DmitryNeural",
                         "ru-RU-SvetlanaNeural",
+                        "ru-RU-DmitryNeural",
                         "en-US-JennyNeural"
                     )
                     val auto = data.firstOrNull { it.name in prefer }?.let { setOf(it.name) }
@@ -322,6 +412,7 @@ class MainActivity : android.app.Activity() {
                 runOnUiThread {
                     voices = data
                     render()
+                    updateChip()
                     status.text = getString(R.string.status_count, data.size, repo.selected().size)
                 }
             } catch (e: Throwable) {
@@ -331,20 +422,39 @@ class MainActivity : android.app.Activity() {
         }
     }
 
+    /** Кликабельное поле «Отмеченные: N»: нажатие включает/выключает фильтр списка. */
+    private fun updateChip() {
+        val n = repo.selected().size
+        chipChecked.text = getString(R.string.chip_checked, n)
+        if (onlyChecked) {
+            chipChecked.background = rounded(color(R.color.md_primary), dp(18))
+            chipChecked.setTextColor(color(R.color.md_on_primary))
+        } else {
+            chipChecked.background = GradientDrawable().apply {
+                setColor(color(R.color.md_surface_card))
+                cornerRadius = dp(18).toFloat()
+                setStroke(dp(1), color(R.color.md_primary))
+            }
+            chipChecked.setTextColor(color(R.color.md_primary))
+        }
+    }
+
     private fun render() {
         list.removeAllViews()
         val q = search.text.toString().trim().lowercase(Locale.ROOT)
         val selected = repo.selected()
         val filtered = voices.filter {
-            q.isEmpty() ||
-                it.name.lowercase().contains(q) ||
-                it.locale.lowercase().contains(q) ||
-                it.friendlyName.lowercase().contains(q)
+            (!onlyChecked || selected.contains(it.name)) &&
+                (q.isEmpty() ||
+                    it.name.lowercase().contains(q) ||
+                    it.locale.lowercase().contains(q) ||
+                    it.friendlyName.lowercase().contains(q))
         }
 
         if (filtered.isEmpty()) {
             list.addView(TextView(this).apply {
                 text = if (voices.isEmpty()) getString(R.string.status_empty_hint)
+                else if (onlyChecked && q.isEmpty()) getString(R.string.status_none_checked)
                 else getString(R.string.status_not_found)
                 setTextColor(color(R.color.md_on_surface_variant))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
@@ -372,6 +482,7 @@ class MainActivity : android.app.Activity() {
                 setOnCheckedChangeListener { _, checked ->
                     repo.setSelected(v.name, checked)
                     status.text = getString(R.string.status_count, voices.size, repo.selected().size)
+                    updateChip()
                     FileLogger.log("Голос ${v.name}: ${if (checked) "выбран" else "снят"}")
                 }
             }
@@ -394,6 +505,15 @@ class MainActivity : android.app.Activity() {
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             })
             row.addView(textCol)
+
+            // ▶ пример голоса (если предзаписан)
+            if (v.name in sampleNames) {
+                val playing = samplePlaying == v.name
+                row.addView(iconButton(
+                    if (playing) ICON_STOP else ICON_PLAY,
+                    "Пример голоса ${v.friendlyName}"
+                ) { toggleSample(v.name) })
+            }
 
             // Gender: Unicode ♂ / ♀ (works without Material Icons font)
             val isFemale = v.gender.equals("Female", ignoreCase = true)
@@ -421,6 +541,7 @@ class MainActivity : android.app.Activity() {
     }
 
     override fun onDestroy() {
+        stopSample()
         tts?.shutdown()
         executor.shutdownNow()
         super.onDestroy()

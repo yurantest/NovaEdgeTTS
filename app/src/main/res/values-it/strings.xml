@@ -3,7 +3,7 @@
     <string name="app_name">NovaEdgeTTS</string>
     <string name="app_subtitle">Motore di sintesi vocale di sistema</string>
     <string name="howto_title">Come attivare</string>
-    <string name="howto_body">1. Aggiorna l’elenco e seleziona le voci necessarie\n2. Tocca l’icona dell’ingranaggio ⚙ per aprire le impostazioni di sintesi vocale di Android\n3. Scegli Nova Edge TTS come motore preferito</string>
+    <string name="howto_body">1. Aggiorna l’elenco e seleziona le voci necessarie\n2. Tocca l’icona dell’ingranaggio ⚙ per aprire le impostazioni di sintesi vocale di Android\n3. Scegli Nova Edge TTS come motore preferito\n4. Seleziona una voce specifica (Svetlana, Dmitry, Jenny, ...)</string>
     <string name="status_loading">Voci: caricamento…</string>
     <string name="status_updating">Aggiornamento elenco voci…</string>
     <string name="status_count">Voci Edge: %1$d  ·  selezionate: %2$d</string>
@@ -21,4 +21,6 @@
     <string name="logs_copy">Copia</string>
     <string name="logs_copied">Log copiati negli appunti</string>
     <string name="ok">OK</string>
+    <string name="chip_checked">Selezionate: %1$d</string>
+    <string name="status_none_checked">Nessuna voce selezionata</string>
 </resources>

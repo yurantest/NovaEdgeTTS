@@ -3,7 +3,7 @@
     <string name="app_name">NovaEdgeTTS</string>
     <string name="app_subtitle">Sistem metin okuma motoru</string>
     <string name="howto_title">Nasıl etkinleştirilir</string>
-    <string name="howto_body">1. Listeyi yenileyin ve istediğiniz sesleri işaretleyin\n2. Dişli simgesine ⚙ dokunun — Android metin okuma ayarları açılır\n3. Tercih edilen motor olarak Nova Edge TTS’i seçin</string>
+    <string name="howto_body">1. Listeyi yenileyin ve istediğiniz sesleri işaretleyin\n2. Dişli simgesine ⚙ dokunun — Android metin okuma ayarları açılır\n3. Tercih edilen motor olarak Nova Edge TTS’i seçin\n4. Belirli bir ses seçin (Svetlana, Dmitry, Jenny, ...)</string>
     <string name="status_loading">Sesler: yükleniyor…</string>
     <string name="status_updating">Ses listesi güncelleniyor…</string>
     <string name="status_count">Edge sesleri: %1$d  ·  seçili: %2$d</string>
@@ -21,4 +21,6 @@
     <string name="logs_copy">Kopyala</string>
     <string name="logs_copied">Günlükler panoya kopyalandı</string>
     <string name="ok">Tamam</string>
+    <string name="chip_checked">İşaretli: %1$d</string>
+    <string name="status_none_checked">İşaretli ses yok</string>
 </resources>

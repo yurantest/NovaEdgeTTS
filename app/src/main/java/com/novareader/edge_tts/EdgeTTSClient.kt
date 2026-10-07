@@ -119,7 +119,10 @@ class EdgeTTSClient {
             FileLogger.log("EdgeTTS: Конфигурация отправлена")
 
             // Формируем SSML
-            val lang = voice.substringBeforeLast('-')
+            // xml:lang — только «язык-РЕГИОН» (первые два сегмента имени голоса).
+            // Раньше брали всё до последнего дефиса: у диалектных голосов
+            // («zh-CN-liaoning-XiaobeiNeural») получалось невалидное «zh-CN-liaoning».
+            val lang = voice.split('-').take(2).joinToString("-")
             val ssml = "<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"$lang\"><voice name=\"$voice\"><prosody rate=\"$rate\" pitch=\"$pitch\" volume=\"$volume\">${escape(text)}</prosody></voice></speak>"
 
             FileLogger.log("EdgeTTS: Отправка SSML")
@@ -165,7 +168,10 @@ class EdgeTTSClient {
             FileLogger.log("EdgeTTS: Всего фреймов: $frameCount, аудио: ${audio.size()} байт")
 
             if (audio.size() == 0) {
-                error("Edge returned no audio")
+                // Типичная причина: голос не «Multilingual» и получил текст на другом языке
+                // (например, английский голос — русский текст): Edge отвечает turn.end без аудио.
+                error("Edge returned no audio for voice=$voice, text='${text.take(40)}' " +
+                    "(если язык текста не совпадает с языком голоса — выберите голос ...MultilingualNeural)")
             }
 
             FileLogger.log("EdgeTTS: Синтез завершён успешно")
