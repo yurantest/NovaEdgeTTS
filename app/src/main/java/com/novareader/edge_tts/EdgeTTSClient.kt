@@ -1,58 +1,79 @@
 package com.novareader.edge_tts
 
 import java.io.*
-import java.security.MessageDigest
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.security.SecureRandom
 import java.text.SimpleDateFormat
 import java.util.*
+import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
-/** Edge Read Aloud client с корректными Client Hints и исправленным GEC. */
+/**
+ * Клиент Edge Read Aloud — Kotlin-аналог `edge_tts/communicate.py` (Python-пакет edge-tts 7.3.1).
+ *
+ * Что сверялось с пакетом: Sec-MS-GEC v2 ([EdgeGec]) и `Sec-MS-GEC-Version=2-…`, заголовки WSS,
+ * speech.config (SentenceBoundary), SSML, нарезка текста по 4096 байт, разбор бинарных кадров,
+ * повтор после 403 с поправкой часов. При выходе новой версии пакета в первую очередь сверять
+ * `constants.py` и `drm.py` (их значения собраны в [EdgeGec]).
+ */
 class EdgeTTSClient {
     companion object {
         private const val HOST = "speech.platform.bing.com"
-        private const val TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4"
-        // Версия Chromium должна быть актуальной: сервер Microsoft отвечает 403 на
-        // устаревшие Sec-MS-GEC-Version (в Python-пакете edge-tts её периодически
-        // обновляют — сверяйте с edge_tts/constants.py, CHROMIUM_FULL_VERSION).
-        private const val CHROMIUM = "143.0.3650.75"
-        private const val CHROMIUM_MAJOR = "143"
-        // Поправка часов телефона относительно сервера (секунды), вычисляется по
-        // заголовку Date из ответа 403 — как DRM.adj_clock_skew_seconds в edge-tts.
-        @Volatile private var clockSkewSec: Long = 0L
         private const val FORMAT = "audio-24khz-48kbitrate-mono-mp3"
+        /** Как в Communicate.__init__: текст режется на куски не больше 4096 байт (после XML-экранирования). */
+        private const val MAX_CHUNK_BYTES = 4096
+        private const val CONNECT_TIMEOUT_MS = 10_000
+        private const val READ_TIMEOUT_MS = 60_000
     }
 
-    private class HandshakeRejected(val status: Int, val serverDateSec: Long?, msg: String) : IllegalStateException(msg)
+    private class HandshakeRejected(val status: Int, val serverDate: String?, msg: String) : IllegalStateException(msg)
 
     fun synthesize(text: String, voice: String, rate: String = "+0%", pitch: String = "+0Hz", volume: String = "+0%"): ByteArray {
+        val chunks = splitByByteLength(escape(removeIncompatibleCharacters(text)), MAX_CHUNK_BYTES)
+        if (chunks.isEmpty()) error("Edge: нет текста для синтеза")
+        if (chunks.size == 1) return synthesizeChunk(chunks[0], voice, rate, pitch, volume)
+        FileLogger.log("EdgeTTS: текст длинный — ${chunks.size} запросов")
+        val out = ByteArrayOutputStream()
+        for (c in chunks) out.write(synthesizeChunk(c, voice, rate, pitch, volume))
+        return out.toByteArray()
+    }
+
+    /** Один запрос; при 403 — подстройка часов по Date сервера и один повтор (как Communicate.stream). */
+    private fun synthesizeChunk(escapedText: String, voice: String, rate: String, pitch: String, volume: String): ByteArray {
         try {
-            return synthesizeOnce(text, voice, rate, pitch, volume)
+            return synthesizeOnce(escapedText, voice, rate, pitch, volume)
         } catch (e: HandshakeRejected) {
-            // 403 часто означает расхождение часов: подстраиваем по Date сервера и повторяем один раз.
-            val sd = e.serverDateSec
-            if (e.status == 403 && sd != null) {
-                val local = System.currentTimeMillis() / 1000L
-                clockSkewSec += (sd - (local + clockSkewSec))
-                FileLogger.log("EdgeTTS: 403 — поправка часов ${clockSkewSec} с, повтор")
-                return synthesizeOnce(text, voice, rate, pitch, volume)
+            if (e.status == 403 && EdgeGec.adjustClockFromServerDate(e.serverDate)) {
+                FileLogger.log("EdgeTTS: 403 — поправка часов ${EdgeGec.skewSeconds()} с, повтор")
+                return synthesizeOnce(escapedText, voice, rate, pitch, volume)
             }
             throw e
         }
     }
 
-    private fun synthesizeOnce(text: String, voice: String, rate: String, pitch: String, volume: String): ByteArray {
+    private fun synthesizeOnce(escapedText: String, voice: String, rate: String, pitch: String, volume: String): ByteArray {
         FileLogger.log("EdgeTTS: Начало синтеза для голоса $voice")
 
         val connId = UUID.randomUUID().toString().replace("-", "")
-        val gec = gec()
+        val gec = EdgeGec.currentToken()
         FileLogger.log("EdgeTTS: GEC=$gec, ConnectionId=$connId")
 
-        val path = "/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=$TOKEN&ConnectionId=$connId&Sec-MS-GEC=$gec&Sec-MS-GEC-Version=1-$CHROMIUM"
+        val path = "/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${EdgeGec.TRUSTED_CLIENT_TOKEN}" +
+            "&ConnectionId=$connId&Sec-MS-GEC=$gec&Sec-MS-GEC-Version=${EdgeGec.SEC_MS_GEC_VERSION}"
 
-        val socket = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(HOST, 443) as javax.net.ssl.SSLSocket
-        socket.soTimeout = 60000
-        socket.startHandshake()
+        // Таймаут подключения 10 с (sock_connect в пакете), чтение — 60 с (sock_read).
+        val raw = Socket()
+        val socket: SSLSocket
+        try {
+            raw.connect(InetSocketAddress(HOST, 443), CONNECT_TIMEOUT_MS)
+            socket = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(raw, HOST, 443, true) as SSLSocket
+            socket.soTimeout = READ_TIMEOUT_MS
+            socket.startHandshake()
+        } catch (e: Exception) {
+            try { raw.close() } catch (_: Exception) {}
+            throw e
+        }
         // Проверка имени хоста (для «сырого» SSLSocket её нужно делать вручную)
         if (!javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier().verify(HOST, socket.session)) {
             socket.close(); error("TLS: имя хоста не совпало с сертификатом")
@@ -66,14 +87,9 @@ class EdgeTTSClient {
             SecureRandom().nextBytes(keyBytes)
             val key = Base64.getEncoder().encodeToString(keyBytes)
 
-            // Заголовки — ровно как у Python-пакета edge-tts (WSS_HEADERS + muid).
-            // Лишние Client Hints / Sec-Fetch-* и Sec-WebSocket-Protocol НЕ отправляем:
-            // настоящий клиент их не шлёт, а сервер сверяет отпечаток запроса.
-            val ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
-                "Chrome/$CHROMIUM_MAJOR.0.0.0 Safari/537.36 Edg/$CHROMIUM_MAJOR.0.0.0"
-            val muid = ByteArray(16).also { SecureRandom().nextBytes(it) }
-                .joinToString("") { "%02X".format(it) }
-
+            // Заголовки — как WSS_HEADERS (+ BASE_HEADERS и muid) в edge-tts. Лишние Client Hints /
+            // Sec-Fetch-* и Sec-WebSocket-Protocol НЕ отправляем: настоящий клиент их не шлёт,
+            // а сервер сверяет отпечаток запроса.
             val req = buildString {
                 append("GET $path HTTP/1.1\r\n")
                 append("Host: $HOST\r\n")
@@ -84,9 +100,10 @@ class EdgeTTSClient {
                 append("Pragma: no-cache\r\n")
                 append("Cache-Control: no-cache\r\n")
                 append("Origin: chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold\r\n")
-                append("User-Agent: $ua\r\n")
+                append("User-Agent: ${EdgeGec.USER_AGENT}\r\n")
+                append("Accept-Encoding: gzip, deflate, br, zstd\r\n")
                 append("Accept-Language: en-US,en;q=0.9\r\n")
-                append("Cookie: muid=$muid;\r\n")
+                append("Cookie: muid=${EdgeGec.muid()};\r\n")
                 append("\r\n")
             }
 
@@ -103,29 +120,22 @@ class EdgeTTSClient {
                 val dateHdr = response.lineSequence()
                     .firstOrNull { it.startsWith("Date:", ignoreCase = true) }
                     ?.substringAfter(":")?.trim()
-                val serverSec = try {
-                    dateHdr?.let {
-                        SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US).parse(it)!!.time / 1000L
-                    }
-                } catch (_: Exception) { null }
-                throw HandshakeRejected(status, serverSec, "Edge WebSocket handshake failed: $response")
+                throw HandshakeRejected(status, dateHdr, "Edge WebSocket handshake failed: $response")
             }
 
             FileLogger.log("EdgeTTS: WebSocket соединение установлено")
 
-            // Отправляем конфигурацию синтеза
-            val configJson = """{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},"outputFormat":"$FORMAT"}}}}"""
+            // speech.config — как send_command_request(): по умолчанию в пакете SentenceBoundary.
+            val configJson = """{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"true","wordBoundaryEnabled":"false"},"outputFormat":"$FORMAT"}}}}"""
             sendText(output, "X-Timestamp:${now()}\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n$configJson\r\n")
             FileLogger.log("EdgeTTS: Конфигурация отправлена")
 
-            // Формируем SSML
-            // xml:lang — только «язык-РЕГИОН» (первые два сегмента имени голоса).
-            // Раньше брали всё до последнего дефиса: у диалектных голосов
-            // («zh-CN-liaoning-XiaobeiNeural») получалось невалидное «zh-CN-liaoning».
-            val lang = voice.split('-').take(2).joinToString("-")
-            val ssml = "<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"$lang\"><voice name=\"$voice\"><prosody rate=\"$rate\" pitch=\"$pitch\" volume=\"$volume\">${escape(text)}</prosody></voice></speak>"
+            // SSML — как mkssml(): xml:lang всегда en-US (язык определяет голос), одинарные кавычки.
+            val ssml = "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>" +
+                "<voice name='$voice'><prosody pitch='$pitch' rate='$rate' volume='$volume'>$escapedText</prosody></voice></speak>"
 
             FileLogger.log("EdgeTTS: Отправка SSML")
+            // «Z» после даты — не ошибка, а баг самого Microsoft Edge (см. ssml_headers_plus_data).
             sendText(output, "X-RequestId:${UUID.randomUUID().toString().replace("-", "")}\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:${now()}Z\r\nPath:ssml\r\n\r\n$ssml")
 
             // Читаем аудио
@@ -139,22 +149,36 @@ class EdgeTTSClient {
                 when (frame.first) {
                     1 -> {
                         val s = String(frame.second, Charsets.UTF_8)
-                        FileLogger.log("EdgeTTS: Текстовый фрейм: ${s.substring(0, minOf(100, s.length))}")
                         if (s.contains("Path:turn.end")) {
                             FileLogger.log("EdgeTTS: Получен turn.end")
                             break
                         }
+                        // audio.metadata (границы предложений) нам не нужны — не засоряем лог
+                        if (!s.contains("Path:audio.metadata")) {
+                            FileLogger.log("EdgeTTS: Текстовый фрейм: ${s.substring(0, minOf(100, s.length))}")
+                        }
                     }
                     2 -> {
-                        if (frame.second.size >= 2) {
-                            val h = ((frame.second[0].toInt() and 255) shl 8) or (frame.second[1].toInt() and 255)
-                            if (h + 2 <= frame.second.size) {
-                                val audioData = frame.second.size - h - 2
-                                audio.write(frame.second, h + 2, audioData)
-                                if (frameCount % 10 == 0) {
-                                    FileLogger.log("EdgeTTS: Получено аудио: ${audio.size()} байт")
-                                }
-                            }
+                        val d = frame.second
+                        if (d.size < 2) continue
+                        val h = ((d[0].toInt() and 255) shl 8) or (d[1].toInt() and 255)
+                        if (h + 2 > d.size) continue
+                        // Как в __stream(): учитываем только Path:audio; Content-Type audio/mpeg
+                        // (кадр без Content-Type и без данных — признак конца потока, пропускаем).
+                        val headers = parseBinaryHeaders(d, h)
+                        if (headers["Path"] != "audio") {
+                            FileLogger.log("EdgeTTS: бинарный кадр с Path=${headers["Path"]} пропущен")
+                            continue
+                        }
+                        val contentType = headers["Content-Type"]
+                        if (contentType != null && contentType != "audio/mpeg") {
+                            FileLogger.log("EdgeTTS: бинарный кадр с Content-Type=$contentType пропущен")
+                            continue
+                        }
+                        val len = d.size - h - 2
+                        if (len > 0 && contentType != null) {
+                            audio.write(d, h + 2, len)
+                            if (frameCount % 10 == 0) FileLogger.log("EdgeTTS: Получено аудио: ${audio.size()} байт")
                         }
                     }
                     9 -> sendControl(output, 10, frame.second)
@@ -170,7 +194,7 @@ class EdgeTTSClient {
             if (audio.size() == 0) {
                 // Типичная причина: голос не «Multilingual» и получил текст на другом языке
                 // (например, английский голос — русский текст): Edge отвечает turn.end без аудио.
-                error("Edge returned no audio for voice=$voice, text='${text.take(40)}' " +
+                error("Edge returned no audio for voice=$voice, text='${escapedText.take(40)}' " +
                     "(если язык текста не совпадает с языком голоса — выберите голос ...MultilingualNeural)")
             }
 
@@ -181,26 +205,79 @@ class EdgeTTSClient {
         }
     }
 
-    // ИСПРАВЛЕНО: правильный алгоритм GEC без потери точности
-    private fun gec(): String {
-        val unixSeconds = System.currentTimeMillis() / 1000L + clockSkewSec
-        val windowsTicks = (unixSeconds + 11644473600L) - ((unixSeconds + 11644473600L) % 300L)
-        val ticks100ns = windowsTicks * 10000000L
-        val bytes = "$ticks100ns$TOKEN".toByteArray()
-        val hash = MessageDigest.getInstance("SHA-256").digest(bytes)
-        return hash.joinToString("") { "%02X".format(it) }
-    }
-
-    // Как date_to_string() в edge-tts: JS-стиль даты.
+    // Как date_to_string(): JS-стиль даты.
     private fun now() = SimpleDateFormat("EEE MMM dd yyyy HH:mm:ss 'GMT+0000 (Coordinated Universal Time)'", Locale.US)
         .apply { timeZone = TimeZone.getTimeZone("GMT") }
         .format(Date())
 
-    private fun escape(s: String) = s.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace("\"", "&quot;")
-        .replace("'", "&apos;")
+    /** Заголовки бинарного кадра: [2 байта длины][заголовки, h байт, с хвостовым CRLF][данные]. */
+    private fun parseBinaryHeaders(d: ByteArray, h: Int): Map<String, String> {
+        val m = HashMap<String, String>()
+        for (line in String(d, 2, h, Charsets.UTF_8).split("\r\n")) {
+            val i = line.indexOf(':')
+            if (i > 0) m[line.substring(0, i)] = line.substring(i + 1)
+        }
+        return m
+    }
+
+    /** XML-экранирование как xml.sax.saxutils.escape: только & < >. */
+    private fun escape(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    /**
+     * Как remove_incompatible_characters(): сервис не принимает часть управляющих символов
+     * (например, вертикальную табуляцию из OCR-PDF) — заменяем их пробелом.
+     */
+    private fun removeIncompatibleCharacters(s: String): String {
+        val sb = StringBuilder(s.length)
+        for (ch in s) {
+            val c = ch.code
+            sb.append(if (c in 0..8 || c in 11..12 || c in 14..31) ' ' else ch)
+        }
+        return sb.toString()
+    }
+
+    /**
+     * Как split_text_by_byte_length(): куски не длиннее [limit] байт UTF-8; режем по
+     * переводу строки, иначе по пробелу, иначе по границе символа; не разрываем XML-сущности (&amp;).
+     */
+    internal fun splitByByteLength(text: String, limit: Int): List<String> {
+        require(limit > 0) { "limit must be > 0" }
+        var bytes = text.toByteArray(Charsets.UTF_8)
+        val out = ArrayList<String>()
+        while (bytes.size > limit) {
+            var split = lastIndexOfByte(bytes, '\n'.code.toByte(), limit)
+            if (split < 0) split = lastIndexOfByte(bytes, ' '.code.toByte(), limit)
+            if (split < 0) {
+                // Нет ни перевода строки, ни пробела (например, китайский текст): режем по границе символа.
+                // (В пакете здесь проверяется весь текст целиком — у нас только первые limit байт.)
+                split = limit
+                while (split > 0 && (bytes[split].toInt() and 0xC0) == 0x80) split--
+            }
+            // Не режем внутри «&…;»
+            while (split > 0) {
+                val amp = lastIndexOfByte(bytes, '&'.code.toByte(), split)
+                if (amp < 0) break
+                var terminated = false
+                for (i in amp until split) if (bytes[i] == ';'.code.toByte()) { terminated = true; break }
+                if (terminated) break
+                split = amp
+            }
+            if (split <= 0) split = minOf(limit, bytes.size) // страховка от зацикливания
+            val chunk = String(bytes, 0, split, Charsets.UTF_8).trim()
+            if (chunk.isNotEmpty()) out += chunk
+            bytes = bytes.copyOfRange(split, bytes.size)
+        }
+        val rest = String(bytes, Charsets.UTF_8).trim()
+        if (rest.isNotEmpty()) out += rest
+        return out
+    }
+
+    /** Последнее вхождение [b] в bytes[0, endExclusive) или -1. */
+    private fun lastIndexOfByte(bytes: ByteArray, b: Byte, endExclusive: Int): Int {
+        var i = minOf(endExclusive, bytes.size) - 1
+        while (i >= 0) { if (bytes[i] == b) return i; i-- }
+        return -1
+    }
 
     private fun readHttpHeaders(input: InputStream): String {
         val b = ByteArrayOutputStream()
